@@ -21,12 +21,12 @@ jsontableschema==0.10.0
 linear-tsv==1.0.0
 lxml==3.7.3
 MarkupSafe==1.0
--e git://github.com/csingley/ofxtools.git@4a3e496d7d2a3babdeabd4e114d98fc5f2862667#egg=ofxtools
+-e git://github.com/csingley/ofxtools.git@bddb3110a9d2ed676a276ad02b5e269ccbe5f12c#egg=ofxtools
 openpyxl==2.4.7
 ordereddict==1.1
 packaging==16.8
 pynab==0.6.8
--e git://github.com/rienafairefr/pynYNAB.git@072110a59ff468b5c30c92b99549c4f2c7d59cb3#egg=pynYNAB
+-e git://github.com/chbndrhnns/pynYNAB.git@89d08f93678205e719b1ca1b9bb94d1de18b7062#egg=pynYNAB
 pyparsing==2.2.0
 python-dateutil==2.6.0
 python-dotenv==0.5.1
