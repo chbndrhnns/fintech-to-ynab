@@ -1,6 +1,7 @@
 import settings
 
-from pynYNAB.Client import nYnabClient, nYnabConnection
+from pynYNAB.Client import nYnabClientFactory
+from pynYNAB.connection import nYnabConnection
 from pynYNAB.schema.budget import Transaction, Payee
 
 from sqlalchemy.sql.expression import exists
@@ -8,16 +9,22 @@ from sqlalchemy.sql.expression import exists
 client = None
 connection = None
 
+
 def init():
     global client
     global connection
 
-    connection = connection or nYnabConnection(settings.ynab_username, settings.ynab_password)
-    client = client or nYnabClient(nynabconnection=connection, budgetname=settings.ynab_budget, logger=settings.log)
-
+    # connection = connection or nYnabConnection(settings.ynab_username, settings.ynab_password)
+    client = client or nYnabClientFactory().create_client(budgetname=settings.ynab_budget,
+                                                          email=settings.ynab_username,
+                                                          password=settings.ynab_password,
+                                                          nynabconnection=connection,
+                                                          sync=True,
+                                                          logger=settings.log)
 
 accounts = {}
 payees = {}
+
 
 def sync():
     settings.log.debug('syncing')
@@ -31,6 +38,7 @@ def sync():
     accounts = {x.account_name: x for x in client.budget.be_accounts}
     payees = {p.name: p for p in client.budget.be_payees}
 
+
 def getaccount(accountname):
     try:
         settings.log.debug('searching for account %s' % accountname)
@@ -39,11 +47,13 @@ def getaccount(accountname):
         settings.log.error('Couldn''t find this account: %s' % accountname)
         return False
 
+
 def payeeexists(payeename):
     try:
         return payees[payeename]
     except KeyError:
         return False
+
 
 def getpayee(payeename):
     try:
@@ -51,21 +61,23 @@ def getpayee(payeename):
         return payees[payeename]
     except KeyError:
         settings.log.debug('Couldn''t find this payee: %s' % payeename)
-        payee=Payee(name=payeename)
+        payee = Payee(name=payeename)
         client.budget.be_payees.append(payee)
         return payee
 
+
 def containsDuplicate(transaction):
-    return client.session.query(exists()\
-   	.where(Transaction.amount==transaction.amount)\
-      	.where(Transaction.entities_account_id==transaction.entities_account_id)\
-      	.where(Transaction.date==transaction.date.date())\
-        .where(Transaction.imported_payee==transaction.imported_payee)\
-        .where(Transaction.source==transaction.source)\
-        ).scalar()
+    return client.session.query(exists()
+                                .where(Transaction.amount == transaction.amount)
+                                .where(Transaction.entities_account_id == transaction.entities_account_id)
+                                .where(Transaction.date == transaction.date.date())
+                                .where(Transaction.imported_payee == transaction.imported_payee)
+                                .where(Transaction.source == transaction.source))\
+                                .scalar()
+
 
 def findPreviousTransaction(payee_name):
-    return client.session.query(Transaction)\
-        .filter(Transaction.imported_payee==payee_name)\
-        .order_by(Transaction.date.desc())\
+    return client.session.query(Transaction) \
+        .filter(Transaction.imported_payee == payee_name) \
+        .order_by(Transaction.date.desc()) \
         .first()
