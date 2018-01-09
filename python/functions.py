@@ -94,7 +94,6 @@ def process_chunk(chunk, settings, ynab_client):
             if subcategory_id is not None:
                 transaction.entities_subcategory_id = subcategory_id
 
-            settings.log.debug('Duplicate detection')
             if ynab_client.containsDuplicate(transaction):
                 settings.log.debug('skipping due to duplicate transaction')
                 duplicates.append(t)
