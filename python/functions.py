@@ -87,7 +87,7 @@ def process_chunk(chunk, settings, ynab_client):
                 imported_date=datetime.now().date(),
                 imported_payee=payee_name,
                 memo=u'{} {}'.format(t.get('memo', 'n/a'), '[m2ynab]'),
-                cleared=True,
+                cleared='Cleared',
                 source="Imported",
             )
 
