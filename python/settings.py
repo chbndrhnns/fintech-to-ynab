@@ -28,3 +28,5 @@ include_tags = os.environ.get('SKIP_TAGS') != 'true'
 include_emoji = os.environ.get('SKIP_EMOJI') != 'true'
 
 log = logging.getLogger(__name__)
+
+transaction_chunk_size = 20

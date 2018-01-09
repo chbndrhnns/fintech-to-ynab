@@ -2,7 +2,7 @@ from flask import Blueprint
 
 import settings
 import ynab_client
-from functions import create_transaction_from_monzo,create_transaction_from_starling
+from functions import create_transaction_from_monzo, create_transaction_from_starling, create_transactions
 
 main_blueprints = Blueprint('main',__name__)
 
@@ -50,3 +50,8 @@ def route_starling():
 @secret_required
 def route_monzo():
     return common_view(create_transaction_from_monzo)
+
+@main_blueprints.route('/batch', methods=['POST'])
+@secret_required
+def route_batch():
+    return common_view(create_transactions)

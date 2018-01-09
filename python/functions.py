@@ -1,19 +1,133 @@
 from datetime import datetime
-from decimal import Decimal
 
 from dateutil.parser import parse
+from decimal import Decimal
+from flask import json
+from pynYNAB.exceptions import WrongPushException
 from pynYNAB.schema.budget import Transaction
 
 import ynab_client as ynab_client_module, settings as settings_module
 
 
-def create_transaction_from_starling(data, settings=settings_module, ynab_client = ynab_client_module):
-    settings.log.debug('received data %s'%data)
+def create_transactions(data, settings=settings_module, ynab_client=ynab_client_module):
+    data = json.loads(data)
+    data_type = data.keys()[0]
+    settings.log.debug('webhook type received %s', data_type)
+    if data_type != 'transactions':
+        return {'error': 'Unsupported webhook type: %s' % data_type}, 400
+
+    transactions = data['transactions']
+
+    # create dict to keep results
+    results = {'message': 'Transaction(s) processed',
+               'duplicates': [],
+               'created': 0}
+
+    # Sync the account so we get the latest payees
+    ynab_client.sync()
+
+    # Process in batches of 20 (default) transactions in case there are more
+    try:
+        for chunk in get_chunk_of_transactions(transactions, settings.transaction_chunk_size):
+            created, duplicates = process_chunk(chunk, settings, ynab_client)
+            results['duplicates'].extend(duplicates)
+            results['created'] += created
+    except AccountNotFoundError as exc:
+        return {"error": "{}".format(exc.message)}, 400
+    except UnicodeError as exc:
+        return {"error": "{}".format(exc.message)}, 400
+
+    if results['created'] is 0:
+        return results, 200
+    else:
+        return results, 201
+
+
+def get_chunk_of_transactions(lst, chunk_size):
+    for i in xrange(0, len(lst), chunk_size):
+        yield lst[i:i + chunk_size]
+
+
+class AccountNotFoundError(RuntimeError):
+    pass
+
+
+def process_chunk(chunk, settings, ynab_client):
+    duplicates = []
+    created = 0
+    expected_delta = 0
+
+    for t in chunk:
+        try:
+            settings.log.debug(t)
+            # Does this account exist?
+            account = ynab_client.getaccount(t['account'])
+            if not account:
+                raise AccountNotFoundError('Account {} was not found'.format(t['account']))
+
+            payee_name = t.get('payee', '')
+            # If we are creating the payee, then we need to increase the delta
+            subcategory_id = None
+            if ynab_client.payeeexists(payee_name):
+                settings.log.debug('payee exists, using %s', payee_name)
+                subcategory_id = get_subcategory_from_payee(payee_name)
+            else:
+                settings.log.debug('payee does not exist, will create %s', payee_name)
+                expected_delta += 1
+
+            entities_payee_id = ynab_client.getpayee(payee_name).id
+
+            # Create the Transaction
+            settings.log.debug('Creating transaction object')
+            transaction = Transaction(
+                entities_account_id=account.id,
+                amount=Decimal(t.get('amount')),
+                date=parse(t.get('created')),
+                entities_payee_id=entities_payee_id,
+                imported_date=datetime.now().date(),
+                imported_payee=payee_name,
+                memo=u'{} {}'.format(t.get('memo', 'n/a'), '[m2ynab]'),
+                cleared=True,
+                source="Imported",
+            )
+
+            if subcategory_id is not None:
+                transaction.entities_subcategory_id = subcategory_id
+
+            settings.log.debug('Duplicate detection')
+            if ynab_client.containsDuplicate(transaction):
+                settings.log.debug('skipping due to duplicate transaction')
+                duplicates.append(t)
+            else:
+                expected_delta += 1
+                settings.log.debug('appending and pushing transaction to YNAB. Delta: %s', expected_delta)
+                ynab_client.client.budget.be_transactions.append(transaction)
+        except AccountNotFoundError as exc:
+            raise exc
+        except UnicodeError as exc:
+            raise UnicodeError(exc, t)
+
+    try:
+        if len(ynab_client.client.budget.be_transactions) is not 0:
+            ynab_client.client.push(expected_delta)
+            created += len(chunk)
+    except WrongPushException as exc:
+        # clean up
+        settings.log.error(
+            'Got WrongPushException from pynYNAB: expected_delta={}, delta={}'.format(exc.expected_delta,
+                                                                                      exc.delta))
+    return created, duplicates
+
+
+def create_transaction_from_starling(data, settings=settings_module, ynab_client=ynab_client_module):
+    settings.log.debug('received data %s' % data)
     expected_delta = 0
     if not data.get('content') or not data['content'].get('type'):
         return {'error': 'No webhook content type provided'}, 400
-    if not data.get('content') or not data['content'].get('type') or not data['content']['type'] in ['TRANSACTION_CARD', 'TRANSACTION_FASTER_PAYMENT_IN', 'TRANSACTION_FASTER_PAYMENT_OUT',
-                                'TRANSACTION_DIRECT_DEBIT']:
+    if not data.get('content') or not data['content'].get('type') or not data['content']['type'] in ['TRANSACTION_CARD',
+                                                                                                     'TRANSACTION_FASTER_PAYMENT_IN',
+                                                                                                     'TRANSACTION_FASTER_PAYMENT_OUT',
+                                                                                                     'TRANSACTION_DIRECT_DEBIT']:
         return {'error': 'Unsupported webhook type: %s' % data.get('content')['type']}, 400
     # Sync the account so we get the latest payees
     ynab_client.sync()
@@ -25,7 +139,6 @@ def create_transaction_from_starling(data, settings=settings_module, ynab_client
     account = ynab_client.getaccount(settings.starling_ynab_account)
     if not account:
         return {'error': 'Account {} was not found'.format(settings.starling_ynab_account)}, 400
-
 
     payee_name = data['content']['counterParty']
     subcategory_id = None
@@ -80,7 +193,7 @@ def create_transaction_from_starling(data, settings=settings_module, ynab_client
         return {'message': 'Transaction created in YNAB successfully.'}, 201
 
 
-def create_transaction_from_monzo(data, settings=settings_module, ynab_client = ynab_client_module):
+def create_transaction_from_monzo(data, settings=settings_module, ynab_client=ynab_client_module):
     settings.log.debug('received data %s' % data)
     expected_delta = 0
     data_type = data.get('type')
@@ -167,7 +280,8 @@ def create_transaction_from_monzo(data, settings=settings_module, ynab_client = 
         ynab_client.client.push(expected_delta)
         return {'message': 'Transaction created in YNAB successfully.'}, 201
 
-def create_transaction_from_csv(data, account, settings=settings_module, ynab_client = ynab_client_module):
+
+def create_transaction_from_csv(data, account, settings=settings_module, ynab_client=ynab_client_module):
     settings.log.debug('received data %s' % data)
     expected_delta = 0
 
@@ -221,7 +335,8 @@ def create_transaction_from_csv(data, account, settings=settings_module, ynab_cl
         ynab_client.client.budget.be_transactions.append(transaction)
         return expected_delta
 
-def get_subcategory_from_payee(payee_name, settings = settings_module, ynab_client = ynab_client_module):
+
+def get_subcategory_from_payee(payee_name, settings=settings_module, ynab_client=ynab_client_module):
     """
     Get payee details for a previous transaction in YNAB.
     If a payee with payee_name has been used in the past, we can get their ID and
@@ -239,7 +354,7 @@ def get_subcategory_from_payee(payee_name, settings = settings_module, ynab_clie
     return None
 
 
-def get_subcategory_id_for_transaction(transaction, payee_name, settings = settings_module):
+def get_subcategory_id_for_transaction(transaction, payee_name, settings=settings_module):
     """
     Gets the subcategory ID for a transaction.
     Filters out transactions that have multiple categories.
@@ -251,7 +366,8 @@ def get_subcategory_id_for_transaction(transaction, payee_name, settings = setti
 
     if subcategory is not None:
         if subcategory.name != 'Split (Multiple Categories)...':
-            settings.log.debug('We have identified the "%s" category as a good default for this payee', subcategory.name)
+            settings.log.debug('We have identified the "%s" category as a good default for this payee',
+                               subcategory.name)
             return subcategory.id
         else:
             settings.log.debug('Split category found, so we will not use that category for %s', payee_name)
