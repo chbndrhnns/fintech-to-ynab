@@ -21,7 +21,6 @@ jsontableschema==0.10.0
 linear-tsv==1.0.0
 lxml==3.7.3
 MarkupSafe==1.0
--e git://github.com/csingley/ofxtools.git@4a3e496d7d2a3babdeabd4e114d98fc5f2862667#egg=ofxtools
 openpyxl==2.4.7
 ordereddict==1.1
 packaging==16.8
