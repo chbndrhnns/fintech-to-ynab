@@ -31,7 +31,10 @@ def create_transactions(data, settings=settings_module, ynab_client=ynab_client_
         for chunk in get_chunk_of_transactions(transactions, settings.transaction_chunk_size):
             created, duplicates = process_chunk(chunk, settings, ynab_client)
             results['duplicates'].extend(duplicates)
-            results['created'] += created
+            created_count = created - len(duplicates)
+            if created_count > 0:
+                created_count = 0
+            results['created'] += created_count
     except AccountNotFoundError as exc:
         return {"error": "{}".format(exc.message)}, 400
     except UnicodeError as exc:
